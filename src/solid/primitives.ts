@@ -1,4 +1,4 @@
-import { createEffect, createSignal, from, onCleanup, type Accessor } from 'solid-js';
+import { createEffect, createSignal, from, onCleanup, untrack, type Accessor } from 'solid-js';
 import { isServer } from 'solid-js/web';
 import type { animate } from 'motion';
 
@@ -19,7 +19,8 @@ export function fromStore<T>(
   const value = from<T>((set) => {
     // Wrap in an updater so values are never mistaken for setter callbacks.
     set(() => read());
-    return subscribe(() => set(() => read()));
+    // Notifications run inside whichever computation wrote the store, so reads here must not become its dependencies.
+    return subscribe(() => set(() => untrack(read)));
   });
   return value as Accessor<T>;
 }
