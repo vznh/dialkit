@@ -151,6 +151,52 @@ describe('framework timeline adapters', () => {
     });
   });
 
+  it('keeps Solid timeline updates from looping through the dock signals', () => {
+    const script = `
+      globalThis.window = { document: {} };
+      globalThis.document = globalThis.window.document;
+      const { createEffect, createRoot } = await import('solid-js');
+      const { fromStore } = await import('./src/solid/primitives.ts');
+      const { createDialTimeline } = await import('./src/solid/createDialTimeline.ts');
+      const { DialStore } = await import('./src/store/DialStore.ts');
+      const { TimelineStore } = await import('./src/store/TimelineStore.ts');
+      const id = 'solid-timeline-loop';
+      let dispose;
+      let timeline;
+      createRoot((cleanup) => {
+        dispose = cleanup;
+        timeline = createDialTimeline('Solid Timeline Loop Test', {
+          clip: { at: 0, duration: 1 },
+        }, { id, autoplay: false });
+        // The dock bridges the timeline list; sections read their meta back out of it.
+        const timelines = fromStore(
+          () => TimelineStore.getTimelines(),
+          (notify) => TimelineStore.subscribeGlobal(notify)
+        );
+        const meta = () => timelines().find((entry) => entry.id === id);
+        const playing = fromStore(
+          () => TimelineStore.getTransport(meta()?.id ?? id).playing,
+          (notify) => TimelineStore.subscribe(meta()?.id ?? id, notify)
+        );
+        createEffect(() => void playing());
+      });
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      // Without untracked reads in fromStore this recurses until the stack overflows.
+      DialStore.updateValue(id, 'clip.duration', 1.5);
+      const edited = timeline().clip.duration;
+      dispose();
+      console.log(JSON.stringify({ edited }));
+    `;
+    const result = spawnSync(
+      process.execPath,
+      ['--conditions=browser', '--import', 'tsx', '--input-type=module', '-e', script],
+      { cwd: process.cwd(), encoding: 'utf8' }
+    );
+
+    assert.equal(result.status, 0, result.stderr);
+    assert.deepEqual(JSON.parse(result.stdout.trim()), { edited: 1.5 });
+  });
+
   it('compiles and resolves the Svelte adapter value contract during SSR', async () => {
     let source = readFileSync('src/svelte/createDialTimeline.svelte.ts', 'utf8');
     source = source
